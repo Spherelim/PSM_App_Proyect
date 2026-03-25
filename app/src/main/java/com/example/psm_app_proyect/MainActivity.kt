@@ -59,6 +59,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 
 class MainActivity : ComponentActivity() {
@@ -81,8 +82,11 @@ class MainActivity : ComponentActivity() {
 
                 val contratos = remember {
                     mutableStateListOf(
-                        Contrato("Juan Pérez", "Departamento", "2026-12-01", "2026-12-01", 5000.0, "Activo"),
-                        Contrato("Ana López", "Local", "2026-12-01", "2026-12-01", 3000.0, "Proximo")
+                        Contrato("Carlos Ruiz", "Departamento", "2026-04-10", "2027-04-10", 4500.0, "Nuevo"),
+                        Contrato("Juan Pérez", "Departamento", "2026-01-01", "2026-12-01", 5000.0, "Activo"),
+                        Contrato("Ana López", "Local", "2025-03-30", "2026-03-30", 3000.0, "Proximo"),
+                        Contrato("Don Camerino", "Local", "2025-03-20", "2026-03-20", 8500.0, "Vencido"),
+                        Contrato("Coppel", "Local", "2025-03-25", "2026-03-26", 12000.0, "Vence Hoy")
                     )
                 }
 
@@ -236,18 +240,20 @@ fun ContratoCard(
     contrato: Contrato,
     onClick: () -> Unit
 ) {
-
     val diasRestantes = calcularDiasRestantes(contrato.fechaFin)
     val estado = obtenerEstado(diasRestantes)
+    val diasParaInicio = calcularDiasParaInicio(contrato.fechaInicio)
+    val contratoEmpezado = diasParaInicio <= 0
 
-    val color = when (estado) {
-        "Activo" -> Color(0xFF4CAF50)
-        "Proximo" -> Color(0xFFFFC107)
-        else -> Color.Red
+    // 1. Lógica para el color principal (Barra lateral y Precio)
+    val colorPrincipal = when {
+        !contratoEmpezado -> Color(0xFF2196F3) // AZUL para contratos que no han iniciado
+        estado == "Activo" -> Color(0xFF4CAF50) // VERDE
+        estado == "Proximo" -> Color(0xFFFFC107) // AMARILLO
+        else -> Color.Red // ROJO (Vencido)
     }
 
     var pressed by remember { mutableStateOf(false) }
-
     val scale by animateFloatAsState(
         targetValue = if (pressed) 0.95f else 1f,
         animationSpec = spring(),
@@ -277,32 +283,87 @@ fun ContratoCard(
     ){
         Row(modifier = Modifier.height(IntrinsicSize.Min)){
 
-            // Barra lateral
+            // Barra lateral con el nuevo color dinámico
             Box(
                 modifier = Modifier
                     .width(8.dp)
                     .fillMaxHeight()
-                    .background(color)
+                    .background(colorPrincipal)
             )
 
             Column(
-                modifier = Modifier.padding(12.dp)
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxWidth()
             ) {
-                Text(
-                    text = contrato.nombre,
-                    fontSize = 18.sp,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(text = "Tipo: ${contrato.tipo}")
-                Text(text = "Inicio: ${contrato.fechaInicio}")
-                Text(text = "Fin: ${contrato.fechaFin}")
-                Text(
-                    text = if (diasRestantes >= 0)
-                        "Vence en $diasRestantes días"
-                    else
-                        "Vencido hace ${-diasRestantes} días"
-                )
-                Text(text = "Pago: $${contrato.monto}")
+                // FILA 1: Nombre y el icono de editar
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = contrato.nombre,
+                            fontSize = 20.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                    }
+                    Text(text = "✎", fontSize = 20.sp)//hay que cambiarlo luego por una imagen
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // FILA 2: Fechas y Tipo de inmueble
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "${contrato.fechaInicio} - ${contrato.fechaFin}",
+                        color = Color.Black,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = contrato.tipo,
+                        color = Color.Black,
+                        fontSize = 13.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // FILA 3: Estado del tiempo y Pago resaltado
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Text(
+                        text = when {
+                            !contratoEmpezado -> "Inicia en $diasParaInicio días"
+                            diasRestantes < 0 -> "Vencido hace ${-diasRestantes} días"
+                            else -> "$diasRestantes días Restantes"
+                        },
+                        color = when {
+                            !contratoEmpezado -> Color(0xFF2196F3)
+                            diasRestantes <= 0 -> Color.Red
+                            diasRestantes < 7  -> Color(0xFFFFC107)
+                            else -> Color.Gray
+                        },
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Text(
+                        text = "$${contrato.monto} MXN / mes",
+                        color = colorPrincipal,
+                        fontSize = 18.sp,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
             }
         }
     }
@@ -565,9 +626,15 @@ fun calcularDiasRestantes(fechaFin: String): Long {
         val hoy = LocalDate.now()
         val fin = LocalDate.parse(fechaFin)
         ChronoUnit.DAYS.between(hoy, fin)
-    } catch (e: Exception) {
-        0
-    }
+    } catch (e: Exception) { 0 }
+}
+
+fun calcularDiasParaInicio(fechaInicio: String): Long {
+    return try {
+        val hoy = LocalDate.now()
+        val inicio = LocalDate.parse(fechaInicio)
+        ChronoUnit.DAYS.between(hoy, inicio)
+    } catch (e: Exception) { 0 }
 }
 
 fun obtenerEstado(dias: Long): String {
