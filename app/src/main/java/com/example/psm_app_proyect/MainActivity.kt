@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.ui.Alignment
 import java.time.Month
 import android.Manifest
+import android.R
 import android.content.pm.PackageManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -56,8 +57,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.blur
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -82,13 +85,27 @@ class MainActivity : ComponentActivity() {
 
                 val contratos = remember {
                     mutableStateListOf(
-                        Contrato("Carlos Ruiz", "Departamento", "2026-04-10", "2027-04-10", 4500.0, "Nuevo"),
-                        Contrato("Juan Pérez", "Departamento", "2026-01-01", "2026-12-01", 5000.0, "Activo"),
-                        Contrato("Ana López", "Local", "2025-03-30", "2026-03-30", 3000.0, "Proximo"),
-                        Contrato("Don Camerino", "Local", "2025-03-20", "2026-03-20", 8500.0, "Vencido"),
-                        Contrato("Coppel", "Local", "2025-03-25", "2026-03-26", 12000.0, "Vence Hoy")
+                        Contrato("Carlos Ruiz", "Departamento", "2026-04-10", "2027-04-10", 4500.0, "Nuevo", "Mensual", 10),
+
+                        Contrato("Juan Pérez", "Departamento", "2026-01-01", "2026-12-01", 1200.0, "Activo", "Semanal", 1),
+
+                        Contrato("Ana López", "Local", "2025-03-30", "2026-03-30", 1500.0, "Proximo", "Quincenal", 15),
+
+                        Contrato("Don Camerino", "Local", "2025-03-20", "2026-03-20", 8500.0, "Vencido", "Mensual", 5),
+
+                        Contrato("Coppel", "Local", "2025-03-25", "2026-03-27", 12000.0, "Vence Hoy", "Mensual", 27),
+
+                        Contrato("Gimnasio Muscle", "Local", "2026-06-01", "2027-06-01", 7000.0, "Nuevo", "Mensual", 1),
+
+                        Contrato("Sofía Castro", "Departamento", "2026-02-15", "2026-08-15", 2500.0, "Activo", "Semanal", 3),
+
+                        Contrato("Tacos El Güero", "Local", "2025-12-01", "2026-12-01", 3500.0, "Activo", "Quincenal", 15)
                     )
                 }
+
+                val navBackStackEntry by navController.currentBackStackEntryAsState()
+                val currentRoute = navBackStackEntry?.destination?.route
+                val mostrarBotones = currentRoute == "lista"
 
                 val context = this
 
@@ -114,29 +131,15 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            gradient
-                        )
-                ) {
+                Box(modifier = Modifier.fillMaxSize().background(gradient)) {
                     Scaffold(
                         containerColor = Color.Transparent,
                         floatingActionButton = {
-                            Column {
-                                FloatingActionButton(onClick = {
-                                    navController.navigate("form/-1")
-                                }) {
-                                    Text("+")
-                                }
-
-                                Spacer(modifier = Modifier.height(10.dp))
-
-                                FloatingActionButton(onClick = {
-                                    navController.navigate("grafica")
-                                }) {
-                                    Text("📊")
+                            if (mostrarBotones) {
+                                Column {
+                                    FloatingActionButton(onClick = { navController.navigate("form/-1") }) { Text("+") }
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    FloatingActionButton(onClick = { navController.navigate("grafica") }) { Text("📊") }
                                 }
                             }
                         }
@@ -194,26 +197,35 @@ fun mostrarNotificacion(context: Context, titulo: String, mensaje: String) {
     manager.notify(System.currentTimeMillis().toInt(), notification)
 }
 
+fun calcularProximoPago(diaPago: Int, frecuencia: String): LocalDate {
+    val hoy = LocalDate.now()
+    var proximo = hoy.withDayOfMonth(1)
+
+    val maxDia = proximo.lengthOfMonth()
+    proximo = proximo.withDayOfMonth(if (diaPago > maxDia) maxDia else diaPago)
+
+    if (proximo.isBefore(hoy)) {
+        proximo = when (frecuencia) {
+            "Semanal" -> hoy.plusWeeks(1)
+            "Quincenal" -> if (hoy.dayOfMonth < 15) hoy.withDayOfMonth(15) else hoy.plusMonths(1).withDayOfMonth(diaPago)
+            else -> hoy.plusMonths(1).withDayOfMonth(if (diaPago > hoy.plusMonths(1).lengthOfMonth()) hoy.plusMonths(1).lengthOfMonth() else diaPago)
+        }
+    }
+    return proximo
+}
+
 fun revisarContratos(context: Context, contratos: List<Contrato>) {
-
     contratos.forEach {
+        val diasVencimiento = calcularDiasRestantes(it.fechaFin)
+        val fechaPago = calcularProximoPago(it.diaPago, it.frecuenciaPago)
+        val diasParaPago = ChronoUnit.DAYS.between(LocalDate.now(), fechaPago)
 
-        val dias = calcularDiasRestantes(it.fechaFin)
-
-        if (dias in 0..3) {
-            mostrarNotificacion(
-                context,
-                "Contrato por vencer",
-                "${it.nombre} vence en $dias días"
-            )
+        if (diasVencimiento in 0..3) {
+            mostrarNotificacion(context, "Contrato por vencer", "${it.nombre} vence en $diasVencimiento días")
         }
 
-        if (dias < 0) {
-            mostrarNotificacion(
-                context,
-                "Contrato vencido",
-                "${it.nombre} ya venció"
-            )
+        if (diasParaPago in 0..2) {
+            mostrarNotificacion(context, "¡Cobro Cercano!", "En $diasParaPago días toca cobrar a ${it.nombre}")
         }
     }
 }
@@ -228,141 +240,77 @@ data class Contrato(
     val fechaInicio: String,
     val fechaFin: String,
     val monto: Double,
-    val estado: String
+    val estado: String,
+    val frecuenciaPago: String,
+    val diaPago: Int
 )
 
 //////////////////////////////////////////////////////////
 // CARD
 //////////////////////////////////////////////////////////
-
 @Composable
-fun ContratoCard(
-    contrato: Contrato,
-    onClick: () -> Unit
-) {
+fun ContratoCard(contrato: Contrato, onClick: () -> Unit) {
     val diasRestantes = calcularDiasRestantes(contrato.fechaFin)
-    val estado = obtenerEstado(diasRestantes)
-    val diasParaInicio = calcularDiasParaInicio(contrato.fechaInicio)
-    val contratoEmpezado = diasParaInicio <= 0
+    val proximoPago = calcularProximoPago(contrato.diaPago, contrato.frecuenciaPago)
+    val diasParaPago = ChronoUnit.DAYS.between(LocalDate.now(), proximoPago)
 
-    // 1. Lógica para el color principal (Barra lateral y Precio)
-    val colorPrincipal = when {
-        !contratoEmpezado -> Color(0xFF2196F3) // AZUL para contratos que no han iniciado
-        estado == "Activo" -> Color(0xFF4CAF50) // VERDE
-        estado == "Proximo" -> Color(0xFFFFC107) // AMARILLO
-        else -> Color.Red // ROJO (Vencido)
+    val colorLateral = when {
+        calcularDiasParaInicio(contrato.fechaInicio) > 0 -> Color(0xFF2196F3)
+        diasRestantes < 0 -> Color.Red
+        diasRestantes <= 7 -> Color(0xFFFFC107)
+        else -> Color(0xFF4CAF50)
     }
-
-    var pressed by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.95f else 1f,
-        animationSpec = spring(),
-        label = "scale"
-    )
 
     Card(
         shape = RoundedCornerShape(20.dp),
         elevation = CardDefaults.cardElevation(6.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
-        ),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(8.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clickable(
-                onClick = {
-                    pressed = true
-                    onClick()
-                    pressed = false
+        modifier = Modifier.fillMaxWidth().padding(8.dp).clickable { onClick() }
+    ) {
+        Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+            Box(modifier = Modifier.width(8.dp).fillMaxHeight().background(colorLateral))
+
+            Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
+                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Text(text = contrato.nombre, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text(text = "✎", fontSize = 18.sp)//hay que cambiar luego el icono por una imagen
                 }
-            )
-    ){
-        Row(modifier = Modifier.height(IntrinsicSize.Min)){
 
-            // Barra lateral con el nuevo color dinámico
-            Box(
-                modifier = Modifier
-                    .width(8.dp)
-                    .fillMaxHeight()
-                    .background(colorPrincipal)
-            )
+                Text(text = "${contrato.fechaInicio} / ${contrato.fechaFin}", fontSize = 13.sp, color = Color.Gray)
 
-            Column(
-                modifier = Modifier
-                    .padding(16.dp)
-                    .fillMaxWidth()
-            ) {
-                // FILA 1: Nombre y el icono de editar
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
                     Column {
                         Text(
-                            text = contrato.nombre,
-                            fontSize = 20.sp,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            style = MaterialTheme.typography.titleLarge
+                            text = "Próximo pago: $proximoPago",
+                            fontSize = 14.sp,
+                            color = if (diasParaPago <= 3) Color.Red else Color.DarkGray,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Faltan $diasParaPago días",
+                            fontSize = 12.sp,
+                            color = Color.Gray
                         )
                     }
-                    Text(text = "✎", fontSize = 20.sp)//hay que cambiarlo luego por una imagen
-                }
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // FILA 2: Fechas y Tipo de inmueble
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "${contrato.fechaInicio} - ${contrato.fechaFin}",
-                        color = Color.Black,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = contrato.tipo,
-                        color = Color.Black,
-                        fontSize = 13.sp
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // FILA 3: Estado del tiempo y Pago resaltado
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Text(
-                        text = when {
-                            !contratoEmpezado -> "Inicia en $diasParaInicio días"
-                            diasRestantes < 0 -> "Vencido hace ${-diasRestantes} días"
-                            else -> "$diasRestantes días Restantes"
-                        },
-                        color = when {
-                            !contratoEmpezado -> Color(0xFF2196F3)
-                            diasRestantes <= 0 -> Color.Red
-                            diasRestantes < 7  -> Color(0xFFFFC107)
-                            else -> Color.Gray
-                        },
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Text(
-                        text = "$${contrato.monto} MXN / mes",
-                        color = colorPrincipal,
-                        fontSize = 18.sp,
-                        style = MaterialTheme.typography.titleMedium
-                    )
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "$${contrato.monto} MXN",
+                            color = Color.Black,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            text = when(contrato.frecuenciaPago){
+                                "Semanal" -> "Cada semana (Día ${contrato.diaPago})"
+                                "Quincenal" -> "Cada quincena (Día ${contrato.diaPago})"
+                                else -> "Cada mes (Día ${contrato.diaPago})"
+                            },
+                            fontSize = 11.sp,
+                            color = Color.Gray
+                        )
+                    }
                 }
             }
         }
@@ -405,221 +353,171 @@ fun ListaContratos(
 //////////////////////////////////////////////////////////
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FormContrato(
-    navController: NavController,
-    contratos: MutableList<Contrato>,
-    index: Int?
-) {
-
-    var showDatePicker by remember { mutableStateOf(false) }
-    var seleccionandoInicio by remember { mutableStateOf(true) }
-
-    val esEdicion = index != null && index >= 0 && index < contratos.size
+fun FormContrato(navController: NavController, contratos: MutableList<Contrato>, index: Int?) {
+    val esEdicion = index != null && index >= 0
     val contrato = if (esEdicion) contratos[index!!] else null
 
+    var nombre by remember { mutableStateOf(contrato?.nombre ?: "") }
+    var tipo by remember { mutableStateOf(contrato?.tipo ?: "Departamento") }
+    var monto by remember { mutableStateOf(contrato?.monto?.toString() ?: "") }
+    var frecuencia by remember { mutableStateOf(contrato?.frecuenciaPago ?: "Mensual") }
+    var diaPago by remember { mutableStateOf(contrato?.diaPago?.toString() ?: "1") }
     var fechaInicio by remember { mutableStateOf(contrato?.fechaInicio ?: "") }
     var fechaFin by remember { mutableStateOf(contrato?.fechaFin ?: "") }
 
-    var nombre by remember { mutableStateOf(contrato?.nombre ?: "") }
-    var tipo by remember { mutableStateOf(contrato?.tipo ?: "") }
-    var monto by remember { mutableStateOf(contrato?.monto?.toString() ?: "") }
+    var error by remember { mutableStateOf("") }
+    var showDatePicker by remember { mutableStateOf(false) }
+    var seleccionandoInicio by remember { mutableStateOf(true) }
+
+    val maxDia = when (frecuencia) {
+        "Semanal" -> 7
+        "Quincenal" -> 14
+        else -> 28
+    }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-
         Text(
-            text = if (esEdicion) "Editar Contrato" else "Nuevo Contrato",
-            fontSize = 20.sp
+            text = if (esEdicion) "Modificar Contrato" else "Crear Nuevo Contrato",
+            fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black
         )
 
-        OutlinedTextField(
-            value = nombre,
-            onValueChange = { nombre = it },
-            label = { Text("Nombre", color = Color.DarkGray) },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        var expanded by remember { mutableStateOf(false) }
-        val opciones = listOf("Local", "Departamento")
-
-        ExposedDropdownMenuBox(
-            expanded = expanded,
-            onExpandedChange = { expanded = !expanded }
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.95f))
         ) {
-            OutlinedTextField(
-                value = tipo,
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("Tipo", color = Color.DarkGray) },
-                textStyle = LocalTextStyle.current.copy(color = Color.DarkGray),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.DarkGray,
-                    unfocusedTextColor = Color.DarkGray
-                ),
-                modifier = Modifier
-                    .menuAnchor()
-                    .fillMaxWidth()
-            )
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
-            ExposedDropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false }
-            ) {
-                opciones.forEach {
-                    DropdownMenuItem(
-                        text = { Text(it) },
-                        onClick = {
-                            tipo = it
-                            expanded = false
-                        }
-                    )
-                }
-            }
-        }
+                OutlinedTextField(
+                    value = nombre, onValueChange = { nombre = it },
+                    label = { Text("Nombre del cliente") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
 
-        OutlinedTextField(
-            value = monto,
-            onValueChange = {
-                if (it.matches(Regex("^\\d*\\.?\\d*$"))) {
-                    monto = it
-                }
-            },
-            label = { Text("Monto", color = Color.DarkGray) },
-            textStyle = LocalTextStyle.current.copy(color = Color.DarkGray),
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Number
-            ),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.DarkGray,
-                unfocusedTextColor = Color.DarkGray
-            ),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Button(
-            onClick = {
-                seleccionandoInicio = true
-                showDatePicker = true
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(if (fechaInicio.isEmpty()) "Seleccionar Fecha Inicio" else fechaInicio)
-        }
-
-        Button(
-            onClick = {
-                seleccionandoInicio = false
-                showDatePicker = true
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(if (fechaFin.isEmpty()) "Seleccionar Fecha Fin" else fechaFin)
-        }
-        if (showDatePicker) {
-
-            val datePickerState = rememberDatePickerState(
-                selectableDates = object : SelectableDates {
-                    override fun isSelectableDate(utcTimeMillis: Long): Boolean {
-                        val hoy = LocalDate.now()
-                        val date = Instant.ofEpochMilli(utcTimeMillis)
-                            .atZone(ZoneId.systemDefault())
-                            .toLocalDate()
-
-                        return !date.isBefore(hoy)
-                    }
-                }
-            )
-
-            DatePickerDialog(
-                onDismissRequest = { showDatePicker = false },
-                confirmButton = {
-                    TextButton(onClick = {
-
-                        val millis = datePickerState.selectedDateMillis
-
-                        if (millis != null) {
-                            val date = Instant.ofEpochMilli(millis)
-                                .atZone(ZoneId.systemDefault())
-                                .toLocalDate()
-
-                            if (seleccionandoInicio) {
-                                fechaInicio = date.toString()
-                            } else {
-                                fechaFin = date.toString()
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    var expFrec by remember { mutableStateOf(false) }
+                    ExposedDropdownMenuBox(
+                        expanded = expFrec,
+                        onExpandedChange = { expFrec = !expFrec },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        OutlinedTextField(
+                            value = frecuencia, onValueChange = {}, readOnly = true,
+                            label = { Text("Frecuencia") },
+                            modifier = Modifier.menuAnchor(),
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expFrec) }
+                        )
+                        ExposedDropdownMenu(expanded = expFrec, onDismissRequest = { expFrec = false }) {
+                            listOf("Semanal", "Quincenal", "Mensual").forEach {
+                                DropdownMenuItem(text = { Text(it) }, onClick = { frecuencia = it; diaPago = "1"; expFrec = false })
                             }
                         }
+                    }
 
-                        showDatePicker = false
-                    }) {
-                        Text("OK")
+                    OutlinedTextField(
+                        value = diaPago,
+                        onValueChange = { if (it.all { c -> c.isDigit() }) diaPago = it },
+                        label = { Text("Día") },
+                        modifier = Modifier.weight(0.6f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        supportingText = { Text("Máx: $maxDia", fontSize = 10.sp) }
+                    )
+                }
+
+                OutlinedTextField(
+                    value = monto, onValueChange = { if (it.matches(Regex("^\\d*\\.?\\d*$"))) monto = it },
+                    label = { Text("Monto de pago") },
+                    modifier = Modifier.fillMaxWidth(),
+                    prefix = { Text("$ ") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+
+                Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+                Text("Vigencia del Contrato", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { seleccionandoInicio = true; showDatePicker = true },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(if (fechaInicio.isEmpty()) "📅 Inicio" else fechaInicio, fontSize = 12.sp)
+                    }
+
+                    Button(
+                        onClick = { seleccionandoInicio = false; showDatePicker = true },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        enabled = fechaInicio.isNotEmpty() // BLOQUEADO si no hay inicio
+                    ) {
+                        Text(if (fechaFin.isEmpty()) "📅 Fin" else fechaFin, fontSize = 12.sp)
                     }
                 }
-            ) {
-                DatePicker(state = datePickerState)
-            }
-        }
-
-        var error by remember { mutableStateOf("") }
-
-        Button(
-            onClick = {
-
-                when {
-                    nombre.isBlank() -> error = "El nombre es obligatorio"
-                    tipo !in listOf("Local", "Departamento") -> error = "Selecciona un tipo válido"
-                    monto.toDoubleOrNull() == null -> error = "Monto inválido"
-                    fechaInicio.isBlank() || fechaFin.isBlank() -> error = "Selecciona fechas"
-                    else -> {
-
-                        val nuevoContrato = Contrato(
-                            nombre,
-                            tipo,
-                            fechaInicio,
-                            fechaFin,
-                            monto.toDouble(),
-                            "Activo"
-                        )
-
-                        if (esEdicion) {
-                            contratos[index!!] = nuevoContrato
-                        } else {
-                            contratos.add(nuevoContrato)
-                        }
-
-                        navController.popBackStack()
-                    }
-                }
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(if (esEdicion) "Actualizar" else "Guardar")
-        }
-        if (esEdicion) {
-            Button(
-                onClick = {
-                    contratos.removeAt(index!!)
-                    navController.popBackStack()
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Eliminar")
             }
         }
 
         if (error.isNotEmpty()) {
-            Text(
-                text = error,
-                color = Color.Red,
-                fontSize = 14.sp
-            )
+            Text(error, color = Color(0xFFFFCDD2), fontWeight = FontWeight.Bold)
+        }
+
+        Button(
+            onClick = {
+                val dInt = diaPago.toIntOrNull() ?: 0
+                val mD = monto.toDoubleOrNull()
+
+                when {
+                    nombre.isBlank() || monto.isBlank() -> error = "Llena los campos básicos"
+                    dInt !in 1..maxDia -> error = "El día debe ser entre 1 y $maxDia para $frecuencia"
+                    fechaInicio.isEmpty() || fechaFin.isEmpty() -> error = "Faltan las fechas"
+                    LocalDate.parse(fechaFin).isBefore(LocalDate.parse(fechaInicio)) -> error = "La fecha fin debe ser mayor al inicio"
+                    else -> {
+                        val nuevo = Contrato(nombre, tipo, fechaInicio, fechaFin, mD ?: 0.0, "Activo", frecuencia, dInt)
+                        if (esEdicion) contratos[index!!] = nuevo else contratos.add(nuevo)
+                        navController.popBackStack()
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth().height(60.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Text("GUARDAR CONTRATO", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        }
+
+        if (esEdicion) {
+            TextButton(onClick = { contratos.removeAt(index!!); navController.popBackStack() }) {
+                Text("Eliminar este contrato", color = Color(0xFFFF8A80))
+            }
         }
     }
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState()
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let {
+                        val date = Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate()
+                        if (seleccionandoInicio) {
+                            fechaInicio = date.toString()
+                            fechaFin = ""
+                        } else {
+                            fechaFin = date.toString()
+                        }
+                    }
+                    showDatePicker = false
+                }) { Text("Confirmar") }
+            }
+        ) { DatePicker(state = datePickerState) }
+    }
 }
+
 
 fun calcularDiasRestantes(fechaFin: String): Long {
     return try {
