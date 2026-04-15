@@ -66,6 +66,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import java.util.Collections.addAll
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -86,9 +87,9 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
 
                 val contratos = remember {
-                    mutableStateListOf(
-                        Contrato("Carlos Ruiz", "Departamento", "2026-04-10", "2027-04-10", 4500.0, "Nuevo", "Mensual", 10)
-                    )
+                    mutableStateListOf<Contrato>().apply {
+                        addAll(ContratoStorage.cargar(this@MainActivity))
+                    }
                 }
 
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -97,8 +98,11 @@ class MainActivity : ComponentActivity() {
 
                 val context = this
 
-                LaunchedEffect(Unit) {
-                    revisarContratos(context, contratos)
+                LaunchedEffect(contratos) {
+                    snapshotFlow { contratos.toList() }
+                        .collect{
+                            ContratoStorage.guardar(this@MainActivity, it)
+                        }
                 }
 
                 val isDark = isSystemInDarkTheme()

@@ -44,6 +44,7 @@ android {
 }
 
 dependencies {
+    implementation("com.google.code.gson:gson:2.13.2")
     implementation("io.github.bytebeats:compose-charts:0.2.1")
     implementation("androidx.navigation:navigation-compose:2.9.7")
     implementation(libs.androidx.core.ktx)
