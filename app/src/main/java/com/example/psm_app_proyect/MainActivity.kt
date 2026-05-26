@@ -92,6 +92,10 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                LaunchedEffect(Unit) {
+                    revisarContratos(this@MainActivity, contratos)
+                }
+
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentRoute = navBackStackEntry?.destination?.route
                 val mostrarBotones = currentRoute == "lista"
@@ -189,35 +193,98 @@ fun mostrarNotificacion(context: Context, titulo: String, mensaje: String) {
     manager.notify(System.currentTimeMillis().toInt(), notification)
 }
 
-fun calcularProximoPago(diaPago: Int, frecuencia: String): LocalDate {
-    val hoy = LocalDate.now()
-    var proximo = hoy.withDayOfMonth(1)
+fun calcularProximoPago(diaPago: Int, frecuencia: String, fechaInicio: String, fechaFin: String): LocalDate? {
+    try {
+        val hoy = LocalDate.now()
+        val inicio = LocalDate.parse(fechaInicio)
+        val fin = LocalDate.parse(fechaFin)
 
-    val maxDia = proximo.lengthOfMonth()
-    proximo = proximo.withDayOfMonth(if (diaPago > maxDia) maxDia else diaPago)
-
-    if (proximo.isBefore(hoy)) {
-        proximo = when (frecuencia) {
-            "Semanal" -> hoy.plusWeeks(1)
-            "Quincenal" -> if (hoy.dayOfMonth < 15) hoy.withDayOfMonth(15) else hoy.plusMonths(1).withDayOfMonth(diaPago)
-            else -> hoy.plusMonths(1).withDayOfMonth(if (diaPago > hoy.plusMonths(1).lengthOfMonth()) hoy.plusMonths(1).lengthOfMonth() else diaPago)
+        if (hoy.isAfter(fin)) {
+            return null
         }
+
+        val puntoPartida = if (hoy.isBefore(inicio)) inicio else hoy
+
+        var proximo = puntoPartida.withDayOfMonth(1)
+        val maxDia = proximo.lengthOfMonth()
+        proximo = proximo.withDayOfMonth(if (diaPago > maxDia) maxDia else diaPago)
+
+        if (proximo.isBefore(puntoPartida)) {
+            proximo = when (frecuencia) {
+                "Semanal" -> puntoPartida.plusWeeks(1)
+                "Quincenal" -> if (puntoPartida.dayOfMonth < 15) puntoPartida.withDayOfMonth(15) else puntoPartida.plusMonths(1).withDayOfMonth(diaPago)
+                else -> puntoPartida.plusMonths(1).withDayOfMonth(if (diaPago > puntoPartida.plusMonths(1).lengthOfMonth()) puntoPartida.plusMonths(1).lengthOfMonth() else diaPago)
+            }
+        }
+
+        if (proximo.isAfter(fin)) {
+            return null
+        }
+
+        return proximo
+
+    } catch (e: Exception) {
+        return null
     }
-    return proximo
 }
 
-fun revisarContratos(context: Context, contratos: List<Contrato>) {
-    contratos.forEach {
-        val diasVencimiento = calcularDiasRestantes(it.fechaFin)
-        val fechaPago = calcularProximoPago(it.diaPago, it.frecuenciaPago)
-        val diasParaPago = ChronoUnit.DAYS.between(LocalDate.now(), fechaPago)
+fun revisarContratos(context: Context, contratos: SnapshotStateList<Contrato>) {
+    val hoy = LocalDate.now()
 
-        if (diasVencimiento in 0..3) {
-            mostrarNotificacion(context, "Contrato por vencer", "${it.nombre} vence en $diasVencimiento días")
+    for (i in contratos.indices) {
+        val it = contratos[i]
+
+        val diasParaInicio = calcularDiasParaInicio(it.fechaInicio)
+        val diasParaFin = calcularDiasRestantes(it.fechaFin)
+        val fechaPago = calcularProximoPago(it.diaPago, it.frecuenciaPago, it.fechaInicio, it.fechaFin)
+
+        var avisoUnDiaInicio = it.notificadoUnDiaInicio
+        var avisoInicioHoy = it.notificadoInicioHoy
+        var avisoUnDiaFin = it.notificadoUnDiaFin
+        var avisoFinHoy = it.notificadoFinHoy
+
+        if (diasParaInicio == 1L && !it.notificadoUnDiaInicio) {
+            mostrarNotificacion(context, "Contrato por iniciar", "Mañana inicia el contrato de ${it.nombre}")
+            avisoUnDiaInicio = true
         }
 
-        if (diasParaPago in 0..2) {
-            mostrarNotificacion(context, "¡Cobro Cercano!", "En $diasParaPago días toca cobrar a ${it.nombre}")
+        if (diasParaInicio == 0L && !it.notificadoInicioHoy) {
+            mostrarNotificacion(context, "Contrato Iniciado", "Hoy ha entrado en vigor el contrato de ${it.nombre}")
+            avisoInicioHoy = true
+        }
+
+        if (diasParaFin == 1L && !it.notificadoUnDiaFin) {
+            mostrarNotificacion(context, "Contrato por finalizar", "Mañana llega a su fin el contrato de ${it.nombre}")
+            avisoUnDiaFin = true
+        }
+
+        if (diasParaFin == 0L && !it.notificadoFinHoy) {
+            mostrarNotificacion(context, "Contrato Finalizado", "Hoy ha vencido formalmente el contrato de ${it.nombre}")
+            avisoFinHoy = true
+        }
+
+        if (fechaPago != null) {
+            val diasParaPago = ChronoUnit.DAYS.between(hoy, fechaPago)
+            if (diasParaPago in 0..2) {
+                mostrarNotificacion(
+                    context,
+                    "¡Cobro Cercano!",
+                    "En $diasParaPago días toca cobrar a ${it.nombre}"
+                )
+            }
+        }
+
+        if (avisoUnDiaInicio != it.notificadoUnDiaInicio ||
+            avisoInicioHoy != it.notificadoInicioHoy ||
+            avisoUnDiaFin != it.notificadoUnDiaFin ||
+            avisoFinHoy != it.notificadoFinHoy) {
+
+            contratos[i] = it.copy(
+                notificadoUnDiaInicio = avisoUnDiaInicio,
+                notificadoInicioHoy = avisoInicioHoy,
+                notificadoUnDiaFin = avisoUnDiaFin,
+                notificadoFinHoy = avisoFinHoy
+            )
         }
     }
 }
@@ -234,7 +301,12 @@ data class Contrato(
     val monto: Double,
     val estado: String,
     val frecuenciaPago: String,
-    val diaPago: Int
+    val diaPago: Int,
+
+    val notificadoUnDiaInicio: Boolean = false,
+    val notificadoInicioHoy: Boolean = false,
+    val notificadoUnDiaFin: Boolean = false,
+    val notificadoFinHoy: Boolean = false
 )
 
 //////////////////////////////////////////////////////////
@@ -243,23 +315,22 @@ data class Contrato(
 @Composable
 fun ContratoCard(contrato: Contrato, onClick: () -> Unit) {
 
-    // Malditas seas Jona, no pusimos que se actualizara la tarjeta mediante la fecha.
     val hoy by produceState(initialValue = LocalDate.now()) {
         while (true) {
-            kotlinx.coroutines.delay(60000) // cada minuto
+            kotlinx.coroutines.delay(60000)
             value = LocalDate.now()
         }
     }
 
     val diasRestantes = calcularDiasRestantes(contrato.fechaFin)
-    val proximoPago = calcularProximoPago(contrato.diaPago, contrato.frecuenciaPago)
-    val diasParaPago = ChronoUnit.DAYS.between(hoy, proximoPago)
+    val diasParaInicio = calcularDiasParaInicio(contrato.fechaInicio)
+    val proximoPago = calcularProximoPago(contrato.diaPago, contrato.frecuenciaPago, contrato.fechaInicio, contrato.fechaFin)
 
     val colorLateral = when {
-        calcularDiasParaInicio(contrato.fechaInicio) > 0 -> Color(0xFF2196F3)
-        diasRestantes < 0 -> Color.Red
-        diasRestantes <= 7 -> Color(0xFFFFC107)
-        else -> Color(0xFF4CAF50)
+        diasParaInicio > 0 -> Color(0xFF2196F3) // Azul: No ha iniciado
+        diasRestantes < 0 -> Color.Red         // Rojo: Vencido
+        diasRestantes <= 7 -> Color(0xFFFFC107) // Amarillo: Por vencer
+        else -> Color(0xFF4CAF50)              // Verde: Activo
     }
 
     Card(
@@ -273,7 +344,6 @@ fun ContratoCard(contrato: Contrato, onClick: () -> Unit) {
             Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                     Text(text = contrato.nombre, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    // Text(text = "✎", fontSize = 18.sp) //Mejor lo quitamos
                 }
 
                 Text(text = "${contrato.fechaInicio} / ${contrato.fechaFin}", fontSize = 13.sp, color = Color.Gray)
@@ -281,18 +351,46 @@ fun ContratoCard(contrato: Contrato, onClick: () -> Unit) {
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
+
                     Column {
-                        Text(
-                            text = "Próximo pago: $proximoPago",
-                            fontSize = 14.sp,
-                            color = if (diasParaPago <= 3) Color.Red else Color.DarkGray,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Faltan $diasParaPago días",
-                            fontSize = 12.sp,
-                            color = Color.Gray
-                        )
+                        if (diasParaInicio > 0) {
+                            Text(
+                                text = "Sin iniciar",
+                                fontSize = 14.sp,
+                                color = Color(0xFF2196F3),
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Inicia en $diasParaInicio días",
+                                fontSize = 12.sp,
+                                color = Color.Gray
+                            )
+                        } else if (proximoPago == null) {
+                            Text(
+                                text = "Contrato Finalizado",
+                                fontSize = 14.sp,
+                                color = Color.Red,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Vencido hace ${kotlin.math.abs(diasRestantes)} días",
+                                fontSize = 12.sp,
+                                color = Color.Gray
+                            )
+                        } else {
+                            val diasParaPago = ChronoUnit.DAYS.between(hoy, proximoPago)
+                            Text(
+                                text = "Próximo pago: $proximoPago",
+                                fontSize = 14.sp,
+                                color = if (diasParaPago <= 3) Color.Red else Color.DarkGray,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Faltan $diasParaPago días",
+                                fontSize = 12.sp,
+                                color = Color.Gray
+                            )
+                        }
                     }
 
                     Column(horizontalAlignment = Alignment.End) {
@@ -304,9 +402,9 @@ fun ContratoCard(contrato: Contrato, onClick: () -> Unit) {
                         )
                         Text(
                             text = when(contrato.frecuenciaPago){
-                                "Semanal" -> "Cada semana (Día ${contrato.diaPago})"
-                                "Quincenal" -> "Cada quincena (Día ${contrato.diaPago})"
-                                else -> "Cada mes (Día ${contrato.diaPago})"
+                                "Semanal" -> "Cada semana"
+                                "Quincenal" -> "Cada quincena"
+                                else -> "Cada mes"
                             },
                             fontSize = 11.sp,
                             color = Color.Gray
@@ -421,12 +519,14 @@ fun FormContrato(navController: NavController, contratos: SnapshotStateList<Cont
     var showDatePicker by remember { mutableStateOf(false) }
     var seleccionandoInicio by remember { mutableStateOf(true) }
 
+    var showHelpModal by remember { mutableStateOf(false) }
+
     val hoy = LocalDate.now()
 
     val maxDia = when (frecuencia) {
         "Semanal" -> 7
         "Quincenal" -> 14
-        else -> 28
+        else -> 30
     }
 
     Column(
@@ -491,8 +591,10 @@ fun FormContrato(navController: NavController, contratos: SnapshotStateList<Cont
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // FRECUENCIA + DIA
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
 
                     var expFrec by remember { mutableStateOf(false) }
 
@@ -529,20 +631,33 @@ fun FormContrato(navController: NavController, contratos: SnapshotStateList<Cont
                         }
                     }
 
-                    OutlinedTextField(
-                        value = diaPago,
-                        onValueChange = {
-                            if (it.all { c -> c.isDigit() }) diaPago = it
-                        },
-                        label = { Text("Día") },
-                        modifier = Modifier.weight(0.5f),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                    )
+                    Column(modifier = Modifier.weight(0.7f)) {
+                        OutlinedTextField(
+                            value = diaPago,
+                            onValueChange = {
+                                if (it.all { c -> c.isDigit() }) diaPago = it
+                            },
+                            label = { Text("Día") },
+                            trailingIcon = {
+                                // Botón de ayuda interactivo tipo "?"
+                                IconButton(onClick = { showHelpModal = true }) {
+                                    Text("❔", fontSize = 16.sp)
+                                }
+                            },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text(
+                            text = "Rango: 1-$maxDia",
+                            fontSize = 11.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // MONTO
                 OutlinedTextField(
                     value = monto,
                     onValueChange = {
@@ -555,7 +670,6 @@ fun FormContrato(navController: NavController, contratos: SnapshotStateList<Cont
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // FECHAS
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
 
                     Button(
@@ -582,14 +696,51 @@ fun FormContrato(navController: NavController, contratos: SnapshotStateList<Cont
             }
         }
 
-        if (error.isNotEmpty()) {
-            Text(error, color = Color.Red)
+        if (showHelpModal) {
+            AlertDialog(
+                onDismissRequest = { showHelpModal = false },
+                title = { Text("¿Cómo configurar el Día?", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "📅 Semanal (1 al 7):\nSelecciona el día de la semana que se cobrará (1 = Lunes, 7 = Domingo).",
+                            fontSize = 14.sp
+                        )
+                        Text(
+                            text = "📅 Quincenal (1 al 14):\nSelecciona el día relativo de cobro:\n• 1 a 7: Lunes a Domingo de la primera semana.\n• 8 a 14: Lunes a Domingo de la segunda semana.",
+                            fontSize = 14.sp
+                        )
+                        Text(
+                            text = "📅 Mensual (1 al 30):\nSelecciona el día calendario exacto de cada mes para realizar el cobro (Días 1 al 30).",
+                            fontSize = 14.sp
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showHelpModal = false }) {
+                        Text("Entendido")
+                    }
+                },
+                shape = RoundedCornerShape(16.dp)
+            )
         }
 
-        // GUARDAR
+        if (error.isNotEmpty()) {
+            AlertDialog(
+                onDismissRequest = { error = "" },
+                title = { Text(text = "Error de Validación", fontWeight = FontWeight.Bold) },
+                text = { Text(text = error) },
+                confirmButton = {
+                    TextButton(onClick = { error = "" }) {
+                        Text("OK")
+                    }
+                },
+                shape = RoundedCornerShape(16.dp)
+            )
+        }
+
         Button(
             onClick = {
-
                 val dInt = diaPago.toIntOrNull() ?: 0
                 val mD = monto.toDoubleOrNull()
 
@@ -599,27 +750,31 @@ fun FormContrato(navController: NavController, contratos: SnapshotStateList<Cont
                 when {
                     nombre.isBlank() -> error = "Nombre vacío"
                     mD == null -> error = "Monto inválido"
-                    dInt !in 1..maxDia -> error = "Día inválido"
+                    dInt !in 1..maxDia -> error = "Día fuera del rango permitido (1-$maxDia)"
                     inicio == null || fin == null -> error = "Fechas inválidas"
-                    inicio.isBefore(hoy) -> error = "La fecha inicio no puede ser pasada"
-                    fin.isBefore(inicio) -> error = "La fecha fin debe ser mayor"
+                    !esEdicion && inicio.isBefore(hoy) -> error = "La fecha inicio no puede ser pasada"
+                    fin.isBefore(inicio) -> error = "La fecha fin debe ser mayor a la fecha de inicio"
                     else -> {
                         val nuevo = Contrato(
-                            nombre,
-                            tipo,
-                            fechaInicio,
-                            fechaFin,
-                            mD,
-                            "Activo",
-                            frecuencia,
-                            dInt
+                            nombre = nombre,
+                            tipo = tipo,
+                            fechaInicio = fechaInicio,
+                            fechaFin = fechaFin,
+                            monto = mD,
+                            estado = contrato?.estado ?: "Activo",
+                            frecuenciaPago = frecuencia,
+                            diaPago = dInt,
+                            notificadoUnDiaInicio = contrato?.notificadoUnDiaInicio ?: false,
+                            notificadoInicioHoy = contrato?.notificadoInicioHoy ?: false,
+                            notificadoUnDiaFin = contrato?.notificadoUnDiaFin ?: false,
+                            notificadoFinHoy = contrato?.notificadoFinHoy ?: false
                         )
-
                         if (esEdicion) {
                             contratos.removeAt(index!!)
                             contratos.add(index, nuevo)
+                        } else {
+                            contratos.add(nuevo)
                         }
-                        else contratos.add(nuevo)
 
                         navController.popBackStack()
                     }
@@ -630,16 +785,16 @@ fun FormContrato(navController: NavController, contratos: SnapshotStateList<Cont
             Text("GUARDAR")
         }
 
-        // ELIMINAR
         if (esEdicion) {
-            TextButton(onClick = {
-                index?.let {
-                    if (it in contratos.indices) {
-                        contratos.removeAt(it)
+            TextButton(
+                onClick = {
+                    index?.let {
+                        if (it in contratos.indices) {
+                            contratos.removeAt(it)
+                        }
                     }
-                }
-                navController.popBackStack()
-            },
+                    navController.popBackStack()
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 10.dp),
@@ -648,14 +803,15 @@ fun FormContrato(navController: NavController, contratos: SnapshotStateList<Cont
                     containerColor = Color.Black.copy(alpha = 0.4f)
                 )
             ) {
-                Text("ELIMINAR CONTRATO",
+                Text(
+                    "ELIMINAR CONTRATO",
                     color = Color.Red.copy(alpha = 0.8f),
-                    fontWeight = FontWeight.Bold)
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }
 
-    // DATE PICKER
     if (showDatePicker) {
         val state = rememberDatePickerState()
 
@@ -668,8 +824,8 @@ fun FormContrato(navController: NavController, contratos: SnapshotStateList<Cont
                             .atZone(ZoneId.systemDefault())
                             .toLocalDate()
 
-                        if (date.isBefore(hoy)) {
-                            error = "No puedes elegir fechas pasadas"
+                        if (!esEdicion && date.isBefore(hoy)) {
+                            error = "No puedes elegir fechas pasadas para contratos nuevos"
                         } else {
                             if (seleccionandoInicio) {
                                 fechaInicio = date.toString()
@@ -689,7 +845,6 @@ fun FormContrato(navController: NavController, contratos: SnapshotStateList<Cont
         }
     }
 }
-
 
 fun calcularDiasRestantes(fechaFin: String): Long {
     return try {
@@ -729,107 +884,7 @@ fun PantallaGrafica(contratos: List<Contrato>) {
     var mesSeleccionado by remember { mutableStateOf(LocalDate.now().monthValue) }
     var anioSeleccionado by remember { mutableStateOf(LocalDate.now().year) }
 
-    val contratosFiltrados = obtenerPagosDelMes(contratos, mesSeleccionado, anioSeleccionado)
-
-    val total = calcularIngresosPorMes(contratos, mesSeleccionado, anioSeleccionado)
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-
-        Text("Filtrar por mes",
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.DarkGray)
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        SelectorAnio(anioSeleccionado) {
-            anioSeleccionado = it
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        SelectorMes(mesSeleccionado) {
-            mesSeleccionado = it
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(10.dp),
-            shape = RoundedCornerShape(25.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = Color.Black.copy(alpha = 0.35f)
-            )
-        ){
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "Ingresos Totales: $${total}",
-                    fontSize = 20.sp,
-                    color = Color.White
-                )
-                Text(
-                    "${meses[mesSeleccionado - 1]} ${anioSeleccionado}", fontSize = 30.sp,
-                    color = Color.White
-                )
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                DonaChart(contratosFiltrados)
-            }
-        }
-//        Text(
-//            text = "Ingresos Totales: $${total}",
-//            fontSize = 20.sp,
-//            color = Color.DarkGray
-//        )
-//        Text("${meses[mesSeleccionado-1]}", fontSize = 30.sp,
-//            color = Color.DarkGray)
-//
-//        Spacer(modifier = Modifier.height(20.dp))
-//
-//        DonaChart(contratosFiltrados)
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        val colores = listOf(
-            Color(0xFF4CAF50),
-            Color(0xFFFFC107),
-            Color(0xFF2196F3),
-            Color(0xFFF44336),
-            Color(0xFF9C27B0)
-        )
-
-        contratosFiltrados.forEachIndexed { index, contrato ->
-
-            val porcentaje = if (total > 0)
-                ((contrato.monto / total) * 100).toInt()
-            else 0
-
-            ItemGraficaCard(
-                nombre = contrato.nombre,
-                porcentaje = porcentaje,
-                color = colores[index % colores.size]
-            )
-        }
-    }
-}
-
-@Composable
-fun DonaChart(contratos: List<Contrato>) {
-
-    val total = contratos.sumOf { it.monto }
+    val totalMes = calcularIngresosPorMes(contratos, mesSeleccionado, anioSeleccionado)
 
     val colores = listOf(
         Color(0xFF4CAF50),
@@ -839,8 +894,145 @@ fun DonaChart(contratos: List<Contrato>) {
         Color(0xFF9C27B0)
     )
 
-    var animationPlayed by remember { mutableStateOf(false) }
+    val itemsGrafica = remember(contratos, mesSeleccionado, anioSeleccionado) {
+        contratos.mapIndexed { index, contrato ->
+            val montoEnMes = calcularMontoDeContratoEnMes(contrato, mesSeleccionado, anioSeleccionado)
+            ItemGrafica(
+                nombre = contrato.nombre.ifBlank { "Sin nombre" },
+                montoGeneradoEnMes = montoEnMes,
+                color = colores[index % colores.size]
+            )
+        }.filter { it.montoGeneradoEnMes > 0.0 }
+    }
 
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+
+        Text(
+            text = "Análisis de Ingresos",
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.Black
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+                .background(
+                    color = Color.Black.copy(alpha = 0.4f),
+                    shape = RoundedCornerShape(24.dp)
+                )
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+
+                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    SelectorMes(mesSeleccionado) {
+                        mesSeleccionado = it
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .width(1.5.dp)
+                        .height(24.dp)
+                        .background(Color.White.copy(alpha = 0.2f))
+                )
+
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = { anioSeleccionado-- },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Text("◀", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                    }
+
+                    Text(
+                        text = "$anioSeleccionado",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 8.dp)
+                    )
+
+                    IconButton(
+                        onClick = { anioSeleccionado++ },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Text("▶", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(25.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.35f))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Ingresos Totales",
+                    fontSize = 15.sp,
+                    color = Color.White.copy(alpha = 0.7f)
+                )
+                Text(
+                    text = "$${"%,.2f".format(totalMes)} MXN",
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White
+                )
+                Text(
+                    text = "${meses[mesSeleccionado - 1]} $anioSeleccionado",
+                    fontSize = 14.sp,
+                    color = Color.White.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                DonaChart(itemsGrafica, totalMes)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        itemsGrafica.forEach { item ->
+            val porcentaje = if (totalMes > 0) (item.montoGeneradoEnMes / totalMes) * 100 else 0.0
+
+            ItemGraficaCard(
+                nombre = item.nombre,
+                porcentaje = porcentaje,
+                color = item.color
+            )
+        }
+    }
+}
+
+@Composable
+fun DonaChart(items: List<ItemGrafica>, totalMes: Double) {
+    var animationPlayed by remember { mutableStateOf(false) }
     val animatedProgress by animateFloatAsState(
         targetValue = if (animationPlayed) 1f else 0f,
         animationSpec = spring(
@@ -854,56 +1046,49 @@ fun DonaChart(contratos: List<Contrato>) {
         animationPlayed = true
     }
 
-    // Box para superponer texto
     Box(
         contentAlignment = Alignment.Center,
-        modifier = Modifier.size(250.dp)
+        modifier = Modifier.size(220.dp)
     ) {
+        val sinDatos = totalMes == 0.0
 
-        val sinDatos = total == 0.0
-        // DONA
         Canvas(modifier = Modifier.matchParentSize()) {
-
             var startAngle = -90f
 
             if (sinDatos) {
                 drawArc(
-                    color = Color.White.copy(alpha = 0.7f),
+                    color = Color.White.copy(alpha = 0.2f),
                     startAngle = 0f,
                     sweepAngle = 360f,
                     useCenter = false,
-                    style = Stroke(width = 50f)
+                    style = Stroke(width = 40f)
                 )
             } else {
-                contratos.forEachIndexed { index, contrato ->
-
-                    val sweepAngle = ((contrato.monto / total) * 360f * animatedProgress).toFloat()
+                items.forEach { item ->
+                    val sweepAngle = ((item.montoGeneradoEnMes / totalMes) * 360f * animatedProgress).toFloat()
 
                     drawArc(
-                        color = colores[index % colores.size],
+                        color = item.color,
                         startAngle = startAngle,
                         sweepAngle = sweepAngle,
                         useCenter = false,
-                        style = Stroke(width = 50f)
+                        style = Stroke(width = 40f)
                     )
-
                     startAngle += sweepAngle
                 }
             }
         }
 
-        // TEXTO EN EL CENTRO
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-
             Text(
-                text = "Total",
-                fontSize = 14.sp,
-                color = Color.White
+                text = "Total Periodo",
+                fontSize = 12.sp,
+                color = Color.White.copy(alpha = 0.6f)
             )
-
             Text(
-                text = "$${"%,.0f".format(total)}",
-                fontSize = 22.sp,
+                text = "$${"%,.2f".format(totalMes)}",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
                 color = Color.White
             )
         }
@@ -939,48 +1124,64 @@ fun calcularIngresosPorMes(contratos: List<Contrato>, mes: Int, anio: Int): Doub
     return total
 }
 
+fun calcularMontoDeContratoEnMes(contrato: Contrato, mes: Int, anio: Int): Double {
+    var totalContrato = 0.0
+    try {
+        val inicio = LocalDate.parse(contrato.fechaInicio)
+        val fin = LocalDate.parse(contrato.fechaFin)
+        var fecha = inicio
+
+        while (!fecha.isAfter(fin)) {
+            if (fecha.monthValue == mes && fecha.year == anio) {
+                totalContrato += contrato.monto
+            }
+            fecha = when (contrato.frecuenciaPago) {
+                "Semanal" -> fecha.plusWeeks(1)
+                "Quincenal" -> fecha.plusDays(15)
+                else -> fecha.plusMonths(1)
+            }
+        }
+    } catch (_: Exception) {}
+    return totalContrato
+}
+
 @Composable
 fun ItemGraficaCard(
     nombre: String,
-    porcentaje: Int,
+    porcentaje: Double,
     color: Color
 ) {
     Card(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
             containerColor = Color.Black.copy(alpha = 0.35f)
         ),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp)
+        modifier = Modifier.fillMaxWidth()
     ) {
         Row(
-            modifier = Modifier
-                .padding(12.dp),
+            modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-
-            // 🔵 Indicador de color (como la dona)
             Box(
                 modifier = Modifier
                     .size(12.dp)
                     .background(color, shape = CircleShape)
             )
 
-            Spacer(modifier = Modifier.width(10.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = nombre,
-                    color = Color.White,
-                    fontSize = 14.sp
-                )
-            }
+            Spacer(modifier = Modifier.width(12.dp))
 
             Text(
-                text = "$porcentaje%",
+                text = nombre,
                 color = Color.White,
-                fontSize = 14.sp
+                fontSize = 14.sp,
+                modifier = Modifier.weight(1f)
+            )
+
+            Text(
+                text = "${"%.1f".format(porcentaje)}%",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
             )
         }
     }
@@ -988,21 +1189,47 @@ fun ItemGraficaCard(
 
 @Composable
 fun SelectorMes(selectedMes: Int, onMesChange: (Int) -> Unit) {
-
     var expanded by remember { mutableStateOf(false) }
 
     Box {
-        Button(onClick = { expanded = true }) {
-            Text(meses[selectedMes - 1],)
+        Row(
+            modifier = Modifier
+                .background(
+                    color = Color.White.copy(alpha = 0.12f), // Fondo translúcido suave
+                    shape = RoundedCornerShape(12.dp)
+                )
+                .clickable { expanded = true }
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = meses[selectedMes - 1],
+                color = Color.White,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = "▼",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 11.sp
+            )
         }
 
         DropdownMenu(
             expanded = expanded,
-            onDismissRequest = { expanded = false }
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.background(Color(0xFF1E293B))
         ) {
             meses.forEachIndexed { index, mes ->
                 DropdownMenuItem(
-                    text = { Text(mes) },
+                    text = {
+                        Text(
+                            text = mes,
+                            color = Color.White,
+                            fontWeight = if (index + 1 == selectedMes) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
                     onClick = {
                         onMesChange(index + 1)
                         expanded = false
@@ -1090,3 +1317,9 @@ fun filtrarPorMes(contratos: List<Contrato>, mes: Int): List<Contrato> {
         }
     }
 }
+
+data class ItemGrafica(
+    val nombre: String,
+    val montoGeneradoEnMes: Double,
+    val color: Color
+)
